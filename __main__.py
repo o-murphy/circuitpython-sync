@@ -202,7 +202,7 @@ class Client:
 
     def run(self):
         try:
-            c.repl_ws()
+            self.repl_ws()
             while True:
                 text = input("> ")
                 self._ws.send(text)
@@ -212,8 +212,11 @@ class Client:
 
 
 class Device:
-    def __init__(self, client: Client):
+    def __init__(self, client: Client, local_path: os.PathLike = "CircuitPython"):
         self.client = client
+        self.ver = self.client.cp_ver().json()
+        self.uid = self.ver.get('uid')
+        self.dev = Path(local_path) / self.uid
 
     def ptree(self, tree_dict, prefix='', path_root=None):
 
@@ -243,29 +246,31 @@ class Device:
                 else:
                     print(f"{RED}{display_name}{RESET}")
 
-    def _make_backup(self, dev):
-        if dev.exists():
+    def _make_backup(self):
+        if self.dev.exists():
             dt = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            bak = dev / "__bak" / dt
+            bak = self.dev / "__bak" / dt
             os.makedirs(bak, exist_ok=True)
 
-            for each in dev.iterdir():
+            for each in self.dev.iterdir():
                 if not each.name == "__bak":
                     shutil.move(each, bak)
 
-    def _fetch_local_cp(self, dev):
-        os.makedirs(dev / "cp", exist_ok=True)
-        os.makedirs(dev / "fs", exist_ok=True)
+    def _fetch_local_cp(self):
+        os.makedirs(self.dev / "cp", exist_ok=True)
+        os.makedirs(self.dev / "fs", exist_ok=True)
 
         for f in {"version.json", "devices.json", "diskinfo.json"}:
-            self.client.download(f"cp/{f}", dev / "cp" / f)
+            src = f"cp/{f}"
+            dst = self.dev / "cp" / f
+            self.client.download(src, dst)
 
-    def _fetch_local_fs(self, dev, tree_):
+    def _fetch_local_fs(self, tree_):
         for k, v in tree_.items():
-            dst = dev / (k[1:] if k.startswith("/") else k)
+            dst = self.dev / (k[1:] if k.startswith("/") else k)
             if isinstance(v, dict):
                 os.makedirs(dst, exist_ok=True)
-                self._fetch_local_fs(dev, v)
+                self._fetch_local_fs(v)
             elif isinstance(v, str):
                 if not v.startswith("Error"):
                     self.client.download(k, dst)
@@ -273,17 +278,6 @@ class Device:
                 self.client.download(k, dst)
             else:
                 ...
-
-    def fetch(self):
-        ver = c.cp_ver().json()
-        uid = ver.get("UID")
-
-        if uid:
-            dev = Path("CircuitPython") / uid
-            self._make_backup(dev)
-            self._fetch_local_cp(dev)
-            fs_tree = self.tree()
-            self._fetch_local_fs(dev, tree_=fs_tree)
 
     def tree(self, path: os.PathLike = "fs/", tree_=None):
         path = Path(path)
@@ -312,6 +306,16 @@ class Device:
                 current_tree[p.as_posix()] = None
 
         return tree_
+
+    def fetch(self):
+        if self.uid:
+            self._make_backup()
+            self._fetch_local_cp()
+            fs_tree = self.tree()
+            self._fetch_local_fs(tree_=fs_tree)
+
+    def sync(self):
+        ...
 
 
 def main():
