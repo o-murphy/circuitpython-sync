@@ -4,7 +4,9 @@ import shutil
 import threading
 import webbrowser
 from datetime import datetime
+from glob import glob
 from pathlib import Path
+from typing import Union
 from urllib.parse import urljoin
 
 import requests
@@ -111,12 +113,13 @@ class Client:
 
     def upload(self, path, filename):
         with open(filename, "rb") as f:
-            return requests.put(
-                urljoin(self._url, path),
-                data=f,
-                headers=self._headers,
-                **self._kwargs
-            )
+            if f:
+                return requests.put(
+                    urljoin(self._url, path),
+                    data=f,
+                    headers=self._headers,
+                    **self._kwargs
+                )
 
     def download(self, path, dest_filename):
         """Download a file from the server to local disk."""
@@ -215,8 +218,10 @@ class Device:
     def __init__(self, client: Client, local_path: os.PathLike = "CircuitPython"):
         self.client = client
         self.ver = self.client.cp_ver().json()
-        self.uid = self.ver.get('uid')
-        self.dev = Path(local_path) / self.uid
+        self.uid = self.ver.get('UID')
+        if not self.uid:
+            raise RuntimeError("Unknown CircuitPython UID")
+        self.dev: Path = Path(local_path) / self.uid
 
     def ptree(self, tree_dict, prefix='', path_root=None):
 
@@ -315,22 +320,25 @@ class Device:
             self._fetch_local_fs(tree_=fs_tree)
 
     def sync(self):
-        ...
+        fs = self.dev / 'fs'
+        if fs.exists() and fs.is_dir():
+            for path in fs.rglob('*'):
+                rel_path = path.relative_to(self.dev)
+                print(f"Attempting to sync: {rel_path} ... ", end="")
+                if path.is_dir():
+                    resp = self.client.put(rel_path.as_posix())
+                    resp.raise_for_status()
+                    print("Directory created.")
+                else:
+                    resp = self.client.upload(rel_path.as_posix(), path)
+                    resp.raise_for_status()
+                    print("File uploaded.")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("-u", "--url", type=str, help="device web workflow url", default=DEFAULT_URL)
     ap.add_argument("-p", "--pass", type=str, help="device web worflow password", default=DEFAULT_PASS)
-
-    # ap.add_argument("--push", type=Path, nargs=2, help="push file(s) to remote device")
-    # ap.add_argument("--pull", type=Path, nargs=2, help="push file(s) from remote device")
-    # ap.add_argument("--repl", action="store_true")
-    # ap.add_argument("--ver", action="store_true")
-    # ap.add_argument("--dev", action="store_true")
-    # ap.add_argument("--code", action="store_true")
-
-    # ap.parse_args()
 
 
 if __name__ == "__main__":
@@ -348,5 +356,6 @@ if __name__ == "__main__":
         print("Body:", r.text)
 
         device = Device(c)
+        # device.sync()
         device.fetch()
-        device.ptree(device.tree())
+        # device.ptree(device.tree())
