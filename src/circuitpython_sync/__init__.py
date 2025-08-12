@@ -1,18 +1,18 @@
 import asyncio
+import base64
 import json
 import os
 import shutil
-import sys
 import webbrowser
 from datetime import datetime
 from fnmatch import fnmatch
-from mailcap import lookup
 from pathlib import Path
 from typing import Iterator
 from urllib.parse import urljoin
 
 import requests
 import websockets
+from prompt_toolkit.patch_stdout import patch_stdout
 
 DEFAULT_URL = "http://circuitpython.local/"
 DEFAULT_PASS = "passw0rd"
@@ -379,32 +379,16 @@ class Device:
         return dest_filename
 
 
-async def get_char_async():
-    """Reads a single character asynchronously without blocking."""
-    loop = asyncio.get_running_loop()
-    char = await loop.run_in_executor(None, sys.stdin.read, 1)
-    return char
-
-
 class Repl:
-    """
-    Client for interacting with a CircuitPython device via its web workflow REPL.
-    """
-
     def __init__(self, client):
         self.client = client
-        self._current_input = ""
         self._is_running = asyncio.Event()
 
     async def run_repl_ws(self):
-        """Starts an interactive REPL session with a non-blocking async approach."""
-
         ws_url = self.client._url.replace("http://", "ws://").replace(
             "https://", "wss://"
         )
         ws_url = urljoin(ws_url, "cp/serial/")
-
-        import base64
 
         auth_header = "Basic " + base64.b64encode(
             f":{self.client._auth[1]}".encode("utf-8")
@@ -412,53 +396,29 @@ class Repl:
         headers = {"Authorization": auth_header}
 
         print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
-        sys.stdout.write(">>> ")
-        sys.stdout.flush()
 
         try:
             async with websockets.connect(ws_url, additional_headers=headers) as ws:
-                # Корутина для виводу з WebSocket
+
                 async def output_handler():
                     try:
                         async for message in ws:
-                            # Очищаємо поточний рядок вводу, друкуємо повідомлення і відновлюємо ввід
-                            # sys.stdout.write(f"\r\033[K{message}\r\n")
-                            sys.stdout.write(f"\r\033[K{message}\r")
-                            sys.stdout.write(f">>> {self._current_input}")
-                            sys.stdout.flush()
+                            if isinstance(message, bytes):
+                                message = message.decode(errors="replace")
+                            print(message, end="", flush=True)
                     except websockets.exceptions.ConnectionClosed:
                         self._is_running.set()
                         print("\nConnection closed by server.")
 
-                # Корутина для неблокуючого вводу з клавіатури
                 async def input_handler():
                     try:
                         while not self._is_running.is_set():
-                            # Асинхронно чекаємо на натискання клавіші
-                            char = await get_char_async()
-
-                            if char:
-                                # Оновлюємо внутрішній стан та вивід на екрані
-                                if char == "\r" or char == "\n":
-                                    await ws.send(self._current_input + "\r")
-                                    self._current_input = ""
-                                elif char == "\x08":  # Backspace
-                                    self._current_input = self._current_input[:-1]
-                                elif char == "\x04":  # Ctrl+D
-                                    raise asyncio.CancelledError
-                                else:
-                                    self._current_input += char
-
-                                # Відновлюємо промт
-                                sys.stdout.write(f"\r\033[K>>> {self._current_input}")
-                                sys.stdout.flush()
-
-                            await asyncio.sleep(0.01)  # Невеликий таймаут для циклу
-                    except asyncio.CancelledError:
-                        self._is_running.set()
-                        print("\nExiting...")
-                        await ws.close()
-                    except (IOError, EOFError):
+                            with patch_stdout():
+                                loop = asyncio.get_running_loop()
+                                line = await loop.run_in_executor(None, input, "")
+                            self._last_input = line
+                            await ws.send(line + "\r")
+                    except (EOFError, KeyboardInterrupt):
                         self._is_running.set()
                         print("\nExiting...")
                         await ws.close()
@@ -470,11 +430,8 @@ class Repl:
         except Exception as e:
             print(f"An error occurred: {e}")
 
-    # Використовуємо цей метод для запуску
     def start_repl(self):
         try:
             asyncio.run(self.run_repl_ws())
         except KeyboardInterrupt:
             print("\nInterrupted, closing connection...")
-        except Exception as e:
-            print(f"An error occurred during asyncio run: {e}")
