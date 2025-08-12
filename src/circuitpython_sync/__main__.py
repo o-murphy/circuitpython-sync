@@ -84,16 +84,19 @@ def main(args=None):
 
     ns = ap.parse_args(args or sys.argv[1:])
 
-    with Client(ns.url, ns.password) as client:
-        if ns.command == "pull":
-            Device(client, ns.dst).pull()
-        elif ns.command == "push":
-            Device(client, ns.src).push()
-        elif ns.command == "tree":
-            with tempfile.TemporaryDirectory() as tmpdir:
-                ptree(Device(client, Path(tmpdir)).tree(ns.path))
-        elif ns.command == "repl":
-            client.repl_ws()
+    try:
+        with Client(ns.url, ns.password) as client:
+            if ns.command == "pull":
+                Device(client, ns.dst).pull()
+            elif ns.command == "push":
+                Device(client, ns.src).push()
+            elif ns.command == "tree":
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    ptree(Device(client, Path(tmpdir)).tree(ns.path))
+            elif ns.command == "repl":
+                client.run_repl_ws()
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
 
 
 if __name__ == "__main__":

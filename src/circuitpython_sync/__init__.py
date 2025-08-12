@@ -14,14 +14,8 @@ import websocket
 
 DEFAULT_URL = "http://circuitpython.local/"
 DEFAULT_PASS = "passw0rd"
-DEFAULT_HEADERS = {
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-}
-DEFAULT_KWARGS = {
-    "allow_redirects": True,
-    "timeout": 5
-}
+DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
+DEFAULT_KWARGS = {"allow_redirects": True, "timeout": 5}
 DEFAULT_CACHE_PATH = "CircuitPython"
 
 # ANSI color codes
@@ -72,46 +66,23 @@ class Client:
         self._kwargs = {
             "auth": self._auth,
         }
-        self._kwargs.update(DEFAULT_KWARGS)
+        self._kwargs.update()
         self._kwargs.update(kwargs)
 
         self._ws = None
         self._ws_thread = None
-        self._ws_buffer = ""
-        self._ws_buffer_lock = threading.Lock()
-        self._ws_buffer_timer = None
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+        self.close_repl_ws()
         return False
-
-    def close(self):
-        """
-        Closes the WebSocket connection and cleans up resources.
-        """
-        if self._ws:
-            self._ws.close()
-
-        if self._ws_buffer_timer and self._ws_buffer_timer.is_alive():
-            self._ws_buffer_timer.cancel()
-
-        if self._ws_thread and self._ws_thread.is_alive():
-            # self._ws_thread.join(timeout=2)
-            ...
-
-        with self._ws_buffer_lock:
-            self._ws_buffer = ""
 
     @request_exception_wrapper
     def options(self):
         """Send an OPTIONS request to the device."""
-        resp = requests.options(
-            urljoin(self._url, "fs/"),
-            **self._kwargs
-        )
+        resp = requests.options(urljoin(self._url, "fs/"), **self._kwargs)
         resp.raise_for_status()
         return resp
 
@@ -119,9 +90,7 @@ class Client:
     def get(self, path):
         """Send a GET request to the device to retrieve data."""
         resp = requests.get(
-            urljoin(self._url, path),
-            headers=self._headers,
-            **self._kwargs
+            urljoin(self._url, path), headers=self._headers, **self._kwargs
         )
         resp.raise_for_status()
         return resp
@@ -130,10 +99,7 @@ class Client:
     def put(self, path, data=None):
         """Send a PUT request to the device to create/update a file or directory."""
         resp = requests.put(
-            urljoin(self._url, path),
-            data=data,
-            headers=self._headers,
-            **self._kwargs
+            urljoin(self._url, path), data=data, headers=self._headers, **self._kwargs
         )
         resp.raise_for_status()
         return resp
@@ -144,10 +110,7 @@ class Client:
         headers = dict(self._headers)
         headers["X-Destination"] = dest_path
         resp = requests.request(
-            "MOVE",
-            urljoin(self._url, src_path),
-            headers=headers,
-            **self._kwargs
+            "MOVE", urljoin(self._url, src_path), headers=headers, **self._kwargs
         )
         resp.raise_for_status()
         return resp
@@ -156,32 +119,10 @@ class Client:
     def delete(self, path):
         """Send a DELETE request to the device to delete a file or directory."""
         resp = requests.delete(
-            urljoin(self._url, path),
-            headers=self._headers,
-            **self._kwargs
+            urljoin(self._url, path), headers=self._headers, **self._kwargs
         )
         resp.raise_for_status()
         return resp
-
-    def upload(self, path, filename):
-        """Upload a local file to the device."""
-        with open(filename, "rb") as f:
-            return requests.put(
-                urljoin(self._url, path),
-                data=f,
-                headers=self._headers,
-                **self._kwargs
-            )
-
-    def download(self, path, dest_filename):
-        """Download a file from the server to local disk."""
-        response = requests.get(
-            urljoin(self._url, path),
-            **self._kwargs
-        )
-        with open(dest_filename, "wb") as f:
-            f.write(response.content)
-        return dest_filename
 
     def cp_devices(self):
         """Get device information."""
@@ -208,18 +149,13 @@ class Client:
         url = urljoin(self._url, "cp/serial/")
         webbrowser.open(url)
 
-    def _process_ws_buffer(self):
-        with self._ws_buffer_lock:
-            if self._ws_buffer:
-                print("Received chunk:", self._ws_buffer)
-                self._ws_buffer = ""
-
-    def repl_ws(self):
+    def open_repl_ws(self):
         """Connect to the device's REPL via WebSocket."""
         ws_url = self._url.replace("http://", "ws://").replace("https://", "wss://")
         ws_url = urljoin(ws_url, "cp/serial/")
 
         import base64
+
         auth_header = "Basic " + base64.b64encode(
             f":{self._auth[1]}".encode("utf-8")
         ).decode("utf-8")
@@ -227,12 +163,7 @@ class Client:
         headers = {"Authorization": auth_header}
 
         def on_message(ws, message):
-            with self._ws_buffer_lock:
-                self._ws_buffer += message
-            if self._ws_buffer_timer and self._ws_buffer_timer.is_alive():
-                self._ws_buffer_timer.cancel()
-            self._ws_buffer_timer = threading.Timer(0.1, self._process_ws_buffer)
-            self._ws_buffer_timer.start()
+            print(message, end="")
 
         def on_error(ws, error):
             print("Error:", error)
@@ -257,19 +188,53 @@ class Client:
 
         return self._ws
 
-    def run(self):
+    def close_repl_ws(self):
+        """
+        Closes the WebSocket connection and cleans up resources.
+        """
+        if self._ws:
+            self._ws.close()
+
+        if self._ws_thread and self._ws_thread.is_alive():
+            ...
+
+    def run_repl_ws(self):
         """Starts an interactive REPL session."""
         try:
-            self.repl_ws()
-            while True:
-                text = input("> ")
-                self._ws.send(text)
+            self.open_repl_ws()
+            print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
+
+            # The input thread will handle getting user input and sending it
+            def input_thread_func():
+                while True:
+                    try:
+                        # Add a carriage return for the REPL to process the command
+                        text = input(">>> ")
+                        self._ws.send(text + "\r")
+                    except (IOError, websocket.WebSocketConnectionClosedException):
+                        print("Connection closed by server.")
+                        break
+                    except EOFError:
+                        print("Exiting...")
+                        break
+
+            input_thread = threading.Thread(target=input_thread_func, daemon=True)
+            input_thread.start()
+
+            # The main thread now simply waits for the WebSocket thread to close
+            # This allows the WebSocket thread to print output without being blocked
+            while self._ws_thread.is_alive() and input_thread.is_alive():
+                self._ws_thread.join(timeout=1)
+
         except KeyboardInterrupt:
-            self.close()
             print("Interrupted, closing connection...")
+        finally:
+            self.close_repl_ws()
+            if self._ws_thread and self._ws_thread.is_alive():
+                self._ws_thread.join()
 
 
-def ptree(tree_dict, prefix='', path_root=None):
+def ptree(tree_dict, prefix="", path_root=None):
     """
     Prints a formatted tree from a dictionary representation of a file system.
     """
@@ -278,7 +243,7 @@ def ptree(tree_dict, prefix='', path_root=None):
 
     items = list(tree_dict.items())
     for i, (path, content) in enumerate(items):
-        is_last = (i == len(items) - 1)
+        is_last = i == len(items) - 1
         name = Path(path).name
 
         new_prefix_item = "└── " if is_last else "├── "
@@ -315,7 +280,19 @@ class Device:
 
     @property
     def uid(self):
-        return self._version.get('UID', None)
+        return self._version.get("UID", None)
+
+    @property
+    def version(self):
+        return self._version
+
+    @property
+    def disk_info(self):
+        return self.client.cp_diskinfo().json()
+
+    @property
+    def list_backups(self):
+        return list((self._cache_path / "_bak").iterdir())
 
     @property
     def cache_path(self):
@@ -327,12 +304,14 @@ class Device:
         with open(self._cache_path / "version.py", "w") as fp:
             json.dump(self._version, fp)
 
-    def auto_backup(self):
+    @staticmethod
+    def auto_backup(cache_path: os.PathLike = DEFAULT_CACHE_PATH):
         """Creates an automatic backup of the local file system cache."""
-        fs_dir = self._cache_path / "fs"
-        bak_dir = self._cache_path / "_bak"
+        cache_path = Path(cache_path)
+        fs_dir = cache_path / "fs"
+        bak_dir = cache_path / "_bak"
         try:
-            if fs_dir.exists() and self._cache_path:
+            if fs_dir.exists() and fs_dir.is_dir():
                 print("Backup of CircuitPython device...", end="")
                 dt = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 backup_path = bak_dir / dt
@@ -344,9 +323,12 @@ class Device:
             print(f"Failed to create backup of CircuitPython device.")
         return None
 
-    def restore_backup(self, backup_path):
+    @staticmethod
+    def restore_backup(cache_path: os.PathLike, backup_path: os.PathLike):
         """Restores the local file system cache from a backup."""
-        fs_dir = self._cache_path / "fs"
+        cache_path = Path(cache_path)
+        backup_path = Path(backup_path)
+        fs_dir = cache_path / "fs"
         try:
             if backup_path.exists() and backup_path.is_dir():
                 os.makedirs(fs_dir, exist_ok=True)
@@ -372,9 +354,9 @@ class Device:
             tree_[path.as_posix()] = f"Error: {e}"
             return tree_
 
-        files = j.get('files', [])
+        files = j.get("files", [])
         for f in files:
-            name = f.get('name')
+            name = f.get("name")
             is_dir = f.get("directory")
             p = path / name
             if is_dir:
@@ -384,7 +366,9 @@ class Device:
 
         return tree_
 
-    def glob(self, pattern: str = None, *, root_path: os.PathLike = "fs/") -> Iterator[str]:
+    def glob(
+        self, pattern: str = None, *, root_path: os.PathLike = "fs/"
+    ) -> Iterator[str]:
         """
         Recursively collects and yields file and directory paths from the device.
 
@@ -406,9 +390,9 @@ class Device:
             except ClientRequestError:
                 return
 
-            files = j.get('files', [])
+            files = j.get("files", [])
             for f in files:
-                name = f.get('name')
+                name = f.get("name")
                 is_dir = f.get("directory")
                 p = path / name
 
@@ -430,7 +414,7 @@ class Device:
         """
         Pulls files from the device to the local cache.
         """
-        backup_path = self.auto_backup()
+        backup_path = self.auto_backup(self._cache_path)
         try:
             for path in self.glob():
                 print(f"Attempting to pull: {path} ... ", end="")
@@ -439,31 +423,43 @@ class Device:
                     os.makedirs(self._cache_path / path, exist_ok=True)
                     print("Directory created.")
                 else:
-                    self.client.download(path, self._cache_path / path)
+                    self.download(path, self._cache_path / path)
                     print("File downloaded.")
             print("Pull done")
         except Exception as e:
             print(f"Error: {e}")
             print("Aborting...")
             if backup_path:
-                self.restore_backup(backup_path)
+                self.restore_backup(self._cache_path, backup_path)
 
     def push(self):
         """
         Pushes files from the local cache to the device.
         """
-        fs = self._cache_path / 'fs'
+        fs = self._cache_path / "fs"
         if fs.exists() and fs.is_dir():
             try:
-                for path in fs.rglob('*'):
+                for path in fs.rglob("*"):
                     rel_path = path.relative_to(self._cache_path)
                     print(f"Attempting to push: {rel_path} ... ", end="")
                     if path.is_dir():
                         self.client.put(rel_path.as_posix() + "/")
                         print("Directory created.")
                     else:
-                        self.client.upload(rel_path.as_posix(), path)
+                        self.upload(rel_path.as_posix(), path)
                         print("File uploaded.")
                 print("Push done")
             except ClientRequestError as e:
                 print(f"Error: {e}")
+
+    def upload(self, path, filename):
+        """Upload a local file to the device."""
+        with open(filename, "rb") as fp:
+            return self.client.put(path, data=fp)
+
+    def download(self, path, dest_filename):
+        """Download a file from the server to local disk."""
+        response = self.client.get(path)
+        with open(dest_filename, "wb") as fp:
+            fp.write(response.content)
+        return dest_filename
