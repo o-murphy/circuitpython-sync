@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import requests
 import websockets
 from prompt_toolkit.patch_stdout import patch_stdout
+from websockets.asyncio import async_timeout
 
 DEFAULT_URL = "http://circuitpython.local/"
 DEFAULT_PASS = "passw0rd"
@@ -382,7 +383,8 @@ class Device:
 class Repl:
     def __init__(self, client):
         self.client = client
-        self._is_running = asyncio.Event()
+        # self._is_running = asyncio.Event()
+        self._is_running = True
 
     async def run_repl_ws(self):
         ws_url = self.client._url.replace("http://", "ws://").replace(
@@ -397,41 +399,70 @@ class Repl:
 
         print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
 
-        try:
-            async with websockets.connect(ws_url, additional_headers=headers, ping_interval=10) as ws:
+        while self._is_running:
+            try:
+                async with websockets.connect(
+                    ws_url, additional_headers=headers, ping_interval=5
+                ) as ws:
 
-                async def output_handler():
-                    try:
-                        async for message in ws:
-                            if isinstance(message, bytes):
-                                message = message.decode(errors="replace")
-                            print(message, end="", flush=True)
-                    except websockets.exceptions.ConnectionClosed:
-                        self._is_running.set()
-                        print("\nConnection closed by server.")
+                    # async def keepalive():
+                    #     try:
+                    #         while True:
+                    #             # await ws.ping()
+                    #             await ws.send("\x00")
+                    #             await asyncio.sleep(5)
+                    #     except Exception:
+                    #         pass
 
-                async def input_handler():
-                    try:
-                        while not self._is_running.is_set():
-                            with patch_stdout():
-                                loop = asyncio.get_running_loop()
+                    async def output_handler():
+                        try:
+                            async for message in ws:
+                                if isinstance(message, bytes):
+                                    message = message.decode(errors="replace")
+                                print(message, end="", flush=True)
+                        except websockets.exceptions.ConnectionClosed:
+                            # self._is_running.set()
+                            print("\nConnection closed by server.")
+
+                    async def input_handler():
+                        try:
+                            loop = asyncio.get_running_loop()
+                            while True:
                                 line = await loop.run_in_executor(None, input, "")
-                            self._last_input = line
-                            await ws.send(line + "\r")
-                    except (EOFError, KeyboardInterrupt):
-                        self._is_running.set()
-                        print("\nExiting...")
-                        await ws.close()
+                                await ws.send(line + "\r")
+                                await asyncio.sleep(0.05)
+                        except (EOFError, KeyboardInterrupt):
+                            print("\nExiting...")
+                            self._is_running = False
+                            await ws.close()
 
-                await asyncio.gather(output_handler(), input_handler())
+                    # async def input_handler():
+                    #     try:
+                    #         while not self._is_running.is_set():
+                    #             with patch_stdout():
+                    #                 loop = asyncio.get_running_loop()
+                    #                 line = await loop.run_in_executor(None, input, "")
+                    #             self._last_input = line
+                    #             await ws.send(line + "\r")
+                    #     except (EOFError, KeyboardInterrupt):
+                    #         self._is_running.set()
+                    #         print("\nExiting...")
+                    #         await ws.close()
 
-        except websockets.exceptions.ConnectionClosed as e:
-            print(f"WebSocket connection closed unexpectedly: {e}")
-        except Exception as e:
-            print(f"An error occurred: {e}")
+                    # await asyncio.gather(output_handler(), input_handler(), keepalive())
+                    await asyncio.gather(output_handler(), input_handler())
+
+            except websockets.exceptions.ConnectionClosedError as e:
+                print(f"Connection lost: {e}. Reconnecting in 1s...")
+                await asyncio.sleep(1)
+            except Exception as e:
+                print(f"Error: {e}. Reconnecting in 1s...")
+                await asyncio.sleep(1)
+
 
     def start_repl(self):
         try:
             asyncio.run(self.run_repl_ws())
         except KeyboardInterrupt:
             print("\nInterrupted, closing connection...")
+            self._is_running = False

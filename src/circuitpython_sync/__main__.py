@@ -91,6 +91,12 @@ def main(args=None):
         parents=[common_parser]
     )
 
+    code_parser = subparsers.add_parser(
+        "code",
+        help="Open web workflow",
+        parents=[common_parser]
+    )
+
     ns = ap.parse_args(args or sys.argv[1:])
 
     try:
