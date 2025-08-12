@@ -1,16 +1,18 @@
+import asyncio
 import json
 import os
 import shutil
-import threading
+import sys
 import webbrowser
 from datetime import datetime
 from fnmatch import fnmatch
+from mailcap import lookup
 from pathlib import Path
 from typing import Iterator
 from urllib.parse import urljoin
 
 import requests
-import websocket
+import websockets
 
 DEFAULT_URL = "http://circuitpython.local/"
 DEFAULT_PASS = "passw0rd"
@@ -69,14 +71,10 @@ class Client:
         self._kwargs.update()
         self._kwargs.update(kwargs)
 
-        self._ws = None
-        self._ws_thread = None
-
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close_repl_ws()
         return False
 
     @request_exception_wrapper
@@ -148,90 +146,6 @@ class Client:
         """Open the web REPL in a browser."""
         url = urljoin(self._url, "cp/serial/")
         webbrowser.open(url)
-
-    def open_repl_ws(self):
-        """Connect to the device's REPL via WebSocket."""
-        ws_url = self._url.replace("http://", "ws://").replace("https://", "wss://")
-        ws_url = urljoin(ws_url, "cp/serial/")
-
-        import base64
-
-        auth_header = "Basic " + base64.b64encode(
-            f":{self._auth[1]}".encode("utf-8")
-        ).decode("utf-8")
-
-        headers = {"Authorization": auth_header}
-
-        def on_message(ws, message):
-            print(message, end="")
-
-        def on_error(ws, error):
-            print("Error:", error)
-
-        def on_close(ws, close_status_code, close_msg):
-            print("WebSocket closed")
-
-        def on_open(ws):
-            print("WebSocket connection opened")
-
-        self._ws = websocket.WebSocketApp(
-            ws_url,
-            header=headers,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-            on_open=on_open,
-        )
-
-        self._ws_thread = threading.Thread(target=self._ws.run_forever, daemon=True)
-        self._ws_thread.start()
-
-        return self._ws
-
-    def close_repl_ws(self):
-        """
-        Closes the WebSocket connection and cleans up resources.
-        """
-        if self._ws:
-            self._ws.close()
-
-        if self._ws_thread and self._ws_thread.is_alive():
-            ...
-
-    def run_repl_ws(self):
-        """Starts an interactive REPL session."""
-        try:
-            self.open_repl_ws()
-            print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
-
-            # The input thread will handle getting user input and sending it
-            def input_thread_func():
-                while True:
-                    try:
-                        # Add a carriage return for the REPL to process the command
-                        text = input(">>> ")
-                        self._ws.send(text + "\r")
-                    except (IOError, websocket.WebSocketConnectionClosedException):
-                        print("Connection closed by server.")
-                        break
-                    except EOFError:
-                        print("Exiting...")
-                        break
-
-            input_thread = threading.Thread(target=input_thread_func, daemon=True)
-            input_thread.start()
-
-            # The main thread now simply waits for the WebSocket thread to close
-            # This allows the WebSocket thread to print output without being blocked
-            while self._ws_thread.is_alive() and input_thread.is_alive():
-                self._ws_thread.join(timeout=1)
-
-        except KeyboardInterrupt:
-            print("Interrupted, closing connection...")
-        finally:
-            self.close_repl_ws()
-            if self._ws_thread and self._ws_thread.is_alive():
-                self._ws_thread.join()
 
 
 def ptree(tree_dict, prefix="", path_root=None):
@@ -463,3 +377,104 @@ class Device:
         with open(dest_filename, "wb") as fp:
             fp.write(response.content)
         return dest_filename
+
+
+async def get_char_async():
+    """Reads a single character asynchronously without blocking."""
+    loop = asyncio.get_running_loop()
+    char = await loop.run_in_executor(None, sys.stdin.read, 1)
+    return char
+
+
+class Repl:
+    """
+    Client for interacting with a CircuitPython device via its web workflow REPL.
+    """
+
+    def __init__(self, client):
+        self.client = client
+        self._current_input = ""
+        self._is_running = asyncio.Event()
+
+    async def run_repl_ws(self):
+        """Starts an interactive REPL session with a non-blocking async approach."""
+
+        ws_url = self.client._url.replace("http://", "ws://").replace(
+            "https://", "wss://"
+        )
+        ws_url = urljoin(ws_url, "cp/serial/")
+
+        import base64
+
+        auth_header = "Basic " + base64.b64encode(
+            f":{self.client._auth[1]}".encode("utf-8")
+        ).decode("utf-8")
+        headers = {"Authorization": auth_header}
+
+        print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
+        sys.stdout.write(">>> ")
+        sys.stdout.flush()
+
+        try:
+            async with websockets.connect(ws_url, additional_headers=headers) as ws:
+                # Корутина для виводу з WebSocket
+                async def output_handler():
+                    try:
+                        async for message in ws:
+                            # Очищаємо поточний рядок вводу, друкуємо повідомлення і відновлюємо ввід
+                            # sys.stdout.write(f"\r\033[K{message}\r\n")
+                            sys.stdout.write(f"\r\033[K{message}\r")
+                            sys.stdout.write(f">>> {self._current_input}")
+                            sys.stdout.flush()
+                    except websockets.exceptions.ConnectionClosed:
+                        self._is_running.set()
+                        print("\nConnection closed by server.")
+
+                # Корутина для неблокуючого вводу з клавіатури
+                async def input_handler():
+                    try:
+                        while not self._is_running.is_set():
+                            # Асинхронно чекаємо на натискання клавіші
+                            char = await get_char_async()
+
+                            if char:
+                                # Оновлюємо внутрішній стан та вивід на екрані
+                                if char == "\r" or char == "\n":
+                                    await ws.send(self._current_input + "\r")
+                                    self._current_input = ""
+                                elif char == "\x08":  # Backspace
+                                    self._current_input = self._current_input[:-1]
+                                elif char == "\x04":  # Ctrl+D
+                                    raise asyncio.CancelledError
+                                else:
+                                    self._current_input += char
+
+                                # Відновлюємо промт
+                                sys.stdout.write(f"\r\033[K>>> {self._current_input}")
+                                sys.stdout.flush()
+
+                            await asyncio.sleep(0.01)  # Невеликий таймаут для циклу
+                    except asyncio.CancelledError:
+                        self._is_running.set()
+                        print("\nExiting...")
+                        await ws.close()
+                    except (IOError, EOFError):
+                        self._is_running.set()
+                        print("\nExiting...")
+                        await ws.close()
+
+                await asyncio.gather(output_handler(), input_handler())
+
+        except websockets.exceptions.ConnectionClosed as e:
+            print(f"WebSocket connection closed unexpectedly: {e}")
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+    # Використовуємо цей метод для запуску
+    def start_repl(self):
+        try:
+            asyncio.run(self.run_repl_ws())
+        except KeyboardInterrupt:
+            print("\nInterrupted, closing connection...")
+        except Exception as e:
+            print(f"An error occurred during asyncio run: {e}")

@@ -1,9 +1,18 @@
 import argparse
+import asyncio
 import sys
 import tempfile
 from pathlib import Path
 
-from circuitpython_sync import Client, Device, DEFAULT_CACHE_PATH, DEFAULT_URL, DEFAULT_PASS, ptree
+from circuitpython_sync import (
+    Client,
+    Device,
+    DEFAULT_CACHE_PATH,
+    DEFAULT_URL,
+    DEFAULT_PASS,
+    ptree,
+    Repl,
+)
 
 
 def main(args=None):
@@ -94,7 +103,7 @@ def main(args=None):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     ptree(Device(client, Path(tmpdir)).tree(ns.path))
             elif ns.command == "repl":
-                client.run_repl_ws()
+                asyncio.run(Repl(client).run_repl_ws())
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
 
