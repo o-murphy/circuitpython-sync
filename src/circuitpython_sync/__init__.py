@@ -398,7 +398,7 @@ class Repl:
         print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
 
         try:
-            async with websockets.connect(ws_url, additional_headers=headers) as ws:
+            async with websockets.connect(ws_url, additional_headers=headers, ping_interval=10) as ws:
 
                 async def output_handler():
                     try:
