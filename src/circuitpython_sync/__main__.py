@@ -103,7 +103,7 @@ def main(args=None):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     ptree(Device(client, Path(tmpdir)).tree(ns.path))
             elif ns.command == "repl":
-                asyncio.run(Repl(client).start_repl())
+                Repl(client).start_repl()
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
 
