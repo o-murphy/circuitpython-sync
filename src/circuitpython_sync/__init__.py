@@ -72,6 +72,7 @@ class Client:
         self._kwargs = {
             "auth": self._auth,
         }
+        self._kwargs.update(DEFAULT_KWARGS)
         self._kwargs.update(kwargs)
 
         self._ws = None
