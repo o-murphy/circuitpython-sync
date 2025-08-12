@@ -40,19 +40,29 @@ class UnknownCircuitPythonDevice(Exception):
 
 
 def request_exception_wrapper(func):
+    """
+    Decorator to wrap requests with a custom exception for better error handling.
+    """
+
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except requests.RequestException as e:
             try:
+                # Attempt to get the response text for more details
                 raise ClientRequestError(f"{e}: {e.response.text}") from e
             except AttributeError:
+                # If no response text is available, raise a simpler error
                 raise ClientRequestError(f"{e}") from e
 
     return wrapper
 
 
 class Client:
+    """
+    Client for interacting with a CircuitPython device via its web workflow.
+    """
+
     def __init__(self, url=DEFAULT_URL, password=DEFAULT_PASS, headers=None, **kwargs):
         if not url.endswith("/"):
             url += "/"
@@ -78,6 +88,9 @@ class Client:
         return False
 
     def close(self):
+        """
+        Closes the WebSocket connection and cleans up resources.
+        """
         if self._ws:
             self._ws.close()
 
@@ -93,6 +106,7 @@ class Client:
 
     @request_exception_wrapper
     def options(self):
+        """Send an OPTIONS request to the device."""
         resp = requests.options(
             urljoin(self._url, "fs/"),
             **self._kwargs
@@ -102,6 +116,7 @@ class Client:
 
     @request_exception_wrapper
     def get(self, path):
+        """Send a GET request to the device to retrieve data."""
         resp = requests.get(
             urljoin(self._url, path),
             headers=self._headers,
@@ -112,6 +127,7 @@ class Client:
 
     @request_exception_wrapper
     def put(self, path, data=None):
+        """Send a PUT request to the device to create/update a file or directory."""
         resp = requests.put(
             urljoin(self._url, path),
             data=data,
@@ -123,6 +139,7 @@ class Client:
 
     @request_exception_wrapper
     def move(self, src_path, dest_path):
+        """Send a MOVE request to the device to rename/move a file or directory."""
         headers = dict(self._headers)
         headers["X-Destination"] = dest_path
         resp = requests.request(
@@ -136,6 +153,7 @@ class Client:
 
     @request_exception_wrapper
     def delete(self, path):
+        """Send a DELETE request to the device to delete a file or directory."""
         resp = requests.delete(
             urljoin(self._url, path),
             headers=self._headers,
@@ -145,6 +163,7 @@ class Client:
         return resp
 
     def upload(self, path, filename):
+        """Upload a local file to the device."""
         with open(filename, "rb") as f:
             return requests.put(
                 urljoin(self._url, path),
@@ -164,21 +183,27 @@ class Client:
         return dest_filename
 
     def cp_devices(self):
+        """Get device information."""
         return self.get("cp/devices.json")
 
     def cp_version(self):
+        """Get CircuitPython version information."""
         return self.get("cp/version.json")
 
     def cp_diskinfo(self):
+        """Get disk usage information."""
         return self.get("cp/diskinfo.json")
 
     def code_web(self):
+        """Open the web code editor in a browser."""
         webbrowser.open(urljoin(self._url, "code/"))
 
     def files_web(self):
+        """Open the file browser in a browser."""
         webbrowser.open(urljoin(self._url, "fs/"))
 
     def repl_web(self):
+        """Open the web REPL in a browser."""
         url = urljoin(self._url, "cp/serial/")
         webbrowser.open(url)
 
@@ -189,6 +214,7 @@ class Client:
                 self._ws_buffer = ""
 
     def repl_ws(self):
+        """Connect to the device's REPL via WebSocket."""
         ws_url = self._url.replace("http://", "ws://").replace("https://", "wss://")
         ws_url = urljoin(ws_url, "cp/serial/")
 
@@ -231,6 +257,7 @@ class Client:
         return self._ws
 
     def run(self):
+        """Starts an interactive REPL session."""
         try:
             self.repl_ws()
             while True:
@@ -241,7 +268,42 @@ class Client:
             print("Interrupted, closing connection...")
 
 
+def ptree(tree_dict, prefix='', path_root=None):
+    """
+    Prints a formatted tree from a dictionary representation of a file system.
+    """
+    if path_root:
+        print(Path(path_root).as_posix() + "/")
+
+    items = list(tree_dict.items())
+    for i, (path, content) in enumerate(items):
+        is_last = (i == len(items) - 1)
+        name = Path(path).name
+
+        new_prefix_item = "└── " if is_last else "├── "
+        new_next_prefix = prefix + ("    " if is_last else "│   ")
+
+        if isinstance(content, dict):
+            print(f"{prefix}{new_prefix_item}{name}/")
+            ptree(content, prefix=new_next_prefix)
+        elif isinstance(content, str) and content.startswith("Error"):
+            print(f"{prefix}{new_prefix_item}{RED}{name} ({content}){RESET}")
+        else:
+            display_name = f"{prefix}{new_prefix_item}{name}"
+
+            if name.endswith(".py"):
+                print(f"{GREEN}{display_name}{RESET}")
+            elif name.endswith(".mpy"):
+                print(f"{YELLOW}{display_name}{RESET}")
+            else:
+                print(f"{RED}{display_name}{RESET}")
+
+
 class Device:
+    """
+    Represents a CircuitPython device and its local cache.
+    """
+
     def __init__(self, client: Client, local_path: os.PathLike = DEFAULT_CACHE_PATH):
         self.client = client
         self._version = self.client.cp_version().json()
@@ -259,39 +321,13 @@ class Device:
         return self._cache_path
 
     def _init_cache(self):
+        """Initializes the local cache directory."""
         os.makedirs(self._cache_path, exist_ok=True)
         with open(self._cache_path / "version.py", "w") as fp:
             json.dump(self._version, fp)
 
-    def ptree(self, tree_dict, prefix='', path_root=None):
-
-        if path_root:
-            print(Path(path_root).as_posix() + "/")
-
-        items = list(tree_dict.items())
-        for i, (path, content) in enumerate(items):
-            is_last = (i == len(items) - 1)
-            name = Path(path).name
-
-            new_prefix_item = "└── " if is_last else "├── "
-            new_next_prefix = prefix + ("    " if is_last else "│   ")
-
-            if isinstance(content, dict):
-                print(f"{prefix}{new_prefix_item}{name}/")
-                self.ptree(content, prefix=new_next_prefix)
-            elif isinstance(content, str) and content.startswith("Error"):
-                print(f"{prefix}{new_prefix_item}{RED}{name} ({content}){RESET}")
-            else:
-                display_name = f"{prefix}{new_prefix_item}{name}"
-
-                if name.endswith(".py"):
-                    print(f"{GREEN}{display_name}{RESET}")
-                elif name.endswith(".mpy"):
-                    print(f"{YELLOW}{display_name}{RESET}")
-                else:
-                    print(f"{RED}{display_name}{RESET}")
-
     def auto_backup(self):
+        """Creates an automatic backup of the local file system cache."""
         fs_dir = self._cache_path / "fs"
         bak_dir = self._cache_path / "_bak"
         try:
@@ -308,6 +344,7 @@ class Device:
         return None
 
     def restore_backup(self, backup_path):
+        """Restores the local file system cache from a backup."""
         fs_dir = self._cache_path / "fs"
         try:
             if backup_path.exists() and backup_path.is_dir():
@@ -319,6 +356,7 @@ class Device:
             print(f"Failed to restore backup of CircuitPython device.")
 
     def tree(self, path: os.PathLike = "fs/", tree_=None):
+        """Recursively builds a dictionary representation of the device's file system."""
         path = Path(path)
         if tree_ is None:
             tree_ = {}
@@ -353,7 +391,6 @@ class Device:
         :param root_path: The starting path to glob from.
         :yields: The path of a file or directory as a string.
         """
-
         root_path = Path(root_path)
 
         # Handle the root path itself
@@ -388,11 +425,14 @@ class Device:
 
         yield from _recursive_glob(root_path, pattern)
 
-    def fetch(self):
+    def pull(self):
+        """
+        Pulls files from the device to the local cache.
+        """
         backup_path = self.auto_backup()
         try:
             for path in self.glob():
-                print(f"Attempting to fetch: {path} ... ", end="")
+                print(f"Attempting to pull: {path} ... ", end="")
                 if path.endswith("/"):
                     self.client.get(path)
                     os.makedirs(self._cache_path / path, exist_ok=True)
@@ -400,26 +440,29 @@ class Device:
                 else:
                     self.client.download(path, self._cache_path / path)
                     print("File downloaded.")
-            print("Fetch done")
+            print("Pull done")
         except Exception as e:
             print(f"Error: {e}")
             print("Aborting...")
             if backup_path:
                 self.restore_backup(backup_path)
 
-    def sync(self):
+    def push(self):
+        """
+        Pushes files from the local cache to the device.
+        """
         fs = self._cache_path / 'fs'
         if fs.exists() and fs.is_dir():
             try:
                 for path in fs.rglob('*'):
                     rel_path = path.relative_to(self._cache_path)
-                    print(f"Attempting to sync: {rel_path} ... ", end="")
+                    print(f"Attempting to push: {rel_path} ... ", end="")
                     if path.is_dir():
                         self.client.put(rel_path.as_posix() + "/")
                         print("Directory created.")
                     else:
                         self.client.upload(rel_path.as_posix(), path)
                         print("File uploaded.")
-                print("Sync done")
+                print("Push done")
             except ClientRequestError as e:
                 print(f"Error: {e}")
