@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import shutil
+import sys
 import webbrowser
 from datetime import datetime
 from fnmatch import fnmatch
@@ -383,7 +384,6 @@ class Device:
 class Repl:
     def __init__(self, client):
         self.client = client
-        # self._is_running = asyncio.Event()
         self._is_running = True
 
     async def run_repl_ws(self):
@@ -397,22 +397,14 @@ class Repl:
         ).decode("utf-8")
         headers = {"Authorization": auth_header}
 
-        print("Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
+        print("* Connecting to REPL. Press Ctrl+C or Ctrl+D to exit.")
 
         while self._is_running:
             try:
                 async with websockets.connect(
                     ws_url, additional_headers=headers, ping_interval=5
                 ) as ws:
-
-                    # async def keepalive():
-                    #     try:
-                    #         while True:
-                    #             # await ws.ping()
-                    #             await ws.send("\x00")
-                    #             await asyncio.sleep(5)
-                    #     except Exception:
-                    #         pass
+                    await ws.send("\r")
 
                     async def output_handler():
                         try:
@@ -421,48 +413,59 @@ class Repl:
                                     message = message.decode(errors="replace")
                                 print(message, end="", flush=True)
                         except websockets.exceptions.ConnectionClosed:
-                            # self._is_running.set()
-                            print("\nConnection closed by server.")
+                            print("\n* Connection closed by server.", file=sys.stderr)
 
                     async def input_handler():
+                        loop = asyncio.get_running_loop()
                         try:
-                            loop = asyncio.get_running_loop()
                             while True:
                                 line = await loop.run_in_executor(None, input, "")
                                 await ws.send(line + "\r")
-                                await asyncio.sleep(0.05)
+                                await asyncio.sleep(0.1)
+                        except asyncio.CancelledError:
+                            return
                         except (EOFError, KeyboardInterrupt):
-                            print("\nExiting...")
+                            print("\n* Exiting...")
                             self._is_running = False
                             await ws.close()
 
-                    # async def input_handler():
-                    #     try:
-                    #         while not self._is_running.is_set():
-                    #             with patch_stdout():
-                    #                 loop = asyncio.get_running_loop()
-                    #                 line = await loop.run_in_executor(None, input, "")
-                    #             self._last_input = line
-                    #             await ws.send(line + "\r")
-                    #     except (EOFError, KeyboardInterrupt):
-                    #         self._is_running.set()
-                    #         print("\nExiting...")
-                    #         await ws.close()
+                    # Запускаємо як окремі таски
+                    out_task = asyncio.create_task(output_handler())
+                    in_task = asyncio.create_task(input_handler())
 
-                    # await asyncio.gather(output_handler(), input_handler(), keepalive())
-                    await asyncio.gather(output_handler(), input_handler())
+                    # Чекаємо завершення будь-якого
+                    done, pending = await asyncio.wait(
+                        [out_task, in_task], return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    # Скасовуємо, якщо лишились живі
+                    for task in pending:
+                        task.cancel()
 
             except websockets.exceptions.ConnectionClosedError as e:
-                print(f"Connection lost: {e}. Reconnecting in 1s...")
+                print(f"* Connection lost: {e}. Reconnecting in 1s...", file=sys.stderr)
                 await asyncio.sleep(1)
             except Exception as e:
-                print(f"Error: {e}. Reconnecting in 1s...")
+                print(f"* Error: {e}. Reconnecting in 1s...", file=sys.stderr)
                 await asyncio.sleep(1)
-
+            print("* Reconnecting attempt")
 
     def start_repl(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
-            asyncio.run(self.run_repl_ws())
+            loop.run_until_complete(self.run_repl_ws())
         except KeyboardInterrupt:
-            print("\nInterrupted, closing connection...")
+            print("\n* Interrupted, closing connection...")
             self._is_running = False
+        finally:
+            # Скасувати всі ще живі таски
+            tasks = asyncio.all_tasks(loop)
+            for t in tasks:
+                t.cancel()
+            loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+
+            # Закрити executor (уникає GIL-крешу на Windows)
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(loop.shutdown_default_executor())
+            loop.close()
