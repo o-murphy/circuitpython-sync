@@ -1,10 +1,57 @@
+[build-system]
+requires = ["setuptools>=80.1.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "circuitpython"
+name = "circuitpython-sync"
+authors = [
+    { name = "Dmytro Yaroshenko" }
+]
 version = "0.1.0"
-description = "Add your description here"
+description = "CircuitPython Fetch/Sync Tool"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.32.4",
     "websocket-client>=1.8.0",
+]
+license = { file = "LICENSE" }
+keywords = ["circuitpython", "workflow", "web", "api"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/hbmartin/circuitpython-sync"
+"Bug Reports" = "https://github.com/hbmartin/circuitpython-sync/issues"
+"Source" = "https://github.com/hbmartin/circuitpython-sync"
+
+[project.scripts]
+cp-sync = "circuitpython_sync.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = [
+    "circuitpython_sync*",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.8",
+]
+
+[tool.ruff]
+include = [
+    "pyproject.toml",
+    "src/**/*.py",
 ]
