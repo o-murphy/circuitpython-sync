@@ -4,6 +4,8 @@ import json
 import os
 import shutil
 import sys
+import threading
+import time
 import webbrowser
 from datetime import datetime
 from fnmatch import fnmatch
@@ -12,6 +14,7 @@ from typing import Iterator
 from urllib.parse import urljoin
 
 import requests
+import websocket
 import websockets
 from prompt_toolkit.patch_stdout import patch_stdout
 from websockets.asyncio import async_timeout
@@ -469,3 +472,67 @@ class Repl:
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
             loop.close()
+
+
+class Repl2:
+    def __init__(self, client):
+        self.client = client
+        self._is_running = True
+        self.ws = None
+
+    def on_message(self, ws, message):
+        if isinstance(message, bytes):
+            message = message.decode(errors="replace")
+        print(message, end="", flush=True)
+
+    def on_error(self, ws, error):
+        print(f"* Error: {error}", file=sys.stderr)
+
+    def on_close(self, ws, close_status_code, close_msg):
+        print("* Connection closed by server.", file=sys.stderr)
+
+    def on_open(self, ws):
+        print("* Connected to REPL. Press Ctrl+C or Ctrl+D to exit.")
+        ws.send("\r")
+
+        def input_loop():
+            try:
+                while self._is_running:
+                    line = input("")
+                    ws.send(line + "\r")
+            except (EOFError, KeyboardInterrupt):
+                self._is_running = False
+                ws.close()
+
+        threading.Thread(target=input_loop, daemon=True).start()
+
+    def run_forever(self):
+        ws_url = self.client._url.replace("http://", "ws://").replace(
+            "https://", "wss://"
+        )
+        ws_url = ws_url.rstrip("/") + "/cp/serial/"
+
+        auth_header = "Basic " + base64.b64encode(
+            f":{self.client._auth[1]}".encode("utf-8")
+        ).decode("utf-8")
+
+        while self._is_running:
+            self.ws = websocket.WebSocketApp(
+                ws_url,
+                header={"Authorization": auth_header},
+                on_open=self.on_open,
+                on_message=self.on_message,
+                on_error=self.on_error,
+                on_close=self.on_close,
+            )
+
+            try:
+                self.ws.run_forever(ping_interval=5)
+            except KeyboardInterrupt:
+                print("\n* Interrupted, closing connection...")
+                self._is_running = False
+                break
+
+            if self._is_running:
+                print("* Reconnecting in 1s...")
+                time.sleep(1)

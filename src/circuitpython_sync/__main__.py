@@ -12,6 +12,7 @@ from circuitpython_sync import (
     DEFAULT_PASS,
     ptree,
     Repl,
+    Repl2,
 )
 
 
@@ -109,7 +110,8 @@ def main(args=None):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     ptree(Device(client, Path(tmpdir)).tree(ns.path))
             elif ns.command == "repl":
-                Repl(client).start_repl()
+                # Repl(client).start_repl()
+                Repl2(client).run_forever()
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
 
