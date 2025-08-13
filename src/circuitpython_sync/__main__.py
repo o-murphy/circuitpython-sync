@@ -24,83 +24,83 @@ def main(args=None):
         "--url",
         type=str,
         help="URL of the CircuitPython device's web workflow (e.g., http://circuitpython.local/)",
-        default=DEFAULT_URL
+        default=DEFAULT_URL,
     )
     common_parser.add_argument(
         "-p",
         "--password",
         type=str,
         help="Password for the CircuitPython device's web workflow.",
-        default=DEFAULT_PASS
+        default=DEFAULT_PASS,
     )
 
     ap = argparse.ArgumentParser(
         description="A command-line tool for managing files on a CircuitPython device via the web workflow.",
-        parents=[common_parser]
+        parents=[common_parser],
     )
     subparsers = ap.add_subparsers(
-        dest="command",
-        help="Choose a command to execute.",
-        required=True
+        dest="command", help="Choose a command to execute.", required=True
     )
 
     # Parser for the 'pull' command
     pull_parser = subparsers.add_parser(
         "pull",
-        help="Downloads files and directories from the device's file system to a local cache.",
-        parents=[common_parser]
+        help="Downloads files and directories from the device to a local cache.",
+        parents=[common_parser],
     )
     pull_parser.add_argument(
         "--dst",
         type=Path,
         help="Local destination path to cache the device's file system.",
-        default=DEFAULT_CACHE_PATH
+        default=DEFAULT_CACHE_PATH,
     )
 
     # Parser for the 'push' command
     push_parser = subparsers.add_parser(
         "push",
-        help="Uploads files and directories from a local path to the device's file system.",
-        parents=[common_parser]
+        help="Uploads files and directories from a local cache to the device.",
+        parents=[common_parser],
     )
     push_parser.add_argument(
         "--src",
         type=Path,
         help="Local source path containing files to push to the device.",
-        default=DEFAULT_CACHE_PATH
+        default=DEFAULT_CACHE_PATH,
     )
 
     # Parser for the 'tree' command
     tree_parser = subparsers.add_parser(
         "tree",
         help="Displays the file system tree of the CircuitPython device.",
-        parents=[common_parser]
+        parents=[common_parser],
     )
     tree_parser.add_argument(
         "--path",
         type=Path,
         help="The starting path on the device to display the tree from.",
-        default="fs/"
+        default="fs/",
     )
 
     # Parser for the 'repl' command
     repl_parser = subparsers.add_parser(
         "repl",
-        help="Connects to the device's serial REPL over WebSocket.",
-        parents=[common_parser]
+        help="Connects to the device's serial REPL over a WebSocket.",
+        parents=[common_parser],
     )
-    repl_parser.add_argument("--web", action="store_true", help="Switch to WebREPL instead of cli")
+    repl_parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Open the web-based REPL instead of using the command-line client.",
+    )
 
     code_parser = subparsers.add_parser(
-        "code",
-        help="Connect to the device's web workflow.",
-        parents=[common_parser]
+        "code", help="Opens the CircuitPython web code editor.", parents=[common_parser]
     )
 
     files_parser = subparsers.add_parser(
         "files",
-        help="Explore files over the web.",
-        parents=[common_parser]
+        help="Opens the CircuitPython web file browser.",
+        parents=[common_parser],
     )
 
     ns = ap.parse_args(args or sys.argv[1:])
@@ -119,7 +119,6 @@ def main(args=None):
             elif ns.command == "files":
                 client.files_web()
             elif ns.command == "repl":
-                # Repl(client).start_repl()
                 if ns.web:
                     client.repl_web()
                 else:

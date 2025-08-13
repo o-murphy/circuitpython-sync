@@ -41,6 +41,12 @@ class UnknownCircuitPythonDevice(Exception):
 def request_exception_wrapper(func):
     """
     Decorator to wrap requests with a custom exception for better error handling.
+
+    Args:
+        func: The function to be wrapped.
+
+    Returns:
+        The wrapped function.
     """
 
     def wrapper(*args, **kwargs):
@@ -60,6 +66,12 @@ def request_exception_wrapper(func):
 class Client:
     """
     Client for interacting with a CircuitPython device via its web workflow.
+
+    Args:
+        url: The base URL of the CircuitPython device.
+        password: The password for authenticating with the device.
+        headers: A dictionary of HTTP headers to send with requests.
+        **kwargs: Additional keyword arguments to pass to the requests library.
     """
 
     def __init__(self, url=DEFAULT_URL, password=DEFAULT_PASS, headers=None, **kwargs):
@@ -71,7 +83,6 @@ class Client:
         self._kwargs = {
             "auth": self._auth,
         }
-        self._kwargs.update()
         self._kwargs.update(kwargs)
 
     def __enter__(self):
@@ -80,16 +91,37 @@ class Client:
     def __exit__(self, exc_type, exc_value, traceback):
         return False
 
+    @property
+    def url(self) -> str:
+        return self._url
+
+    @property
+    def password(self) -> str:
+        return self._auth[1]
+
     @request_exception_wrapper
     def options(self):
-        """Send an OPTIONS request to the device."""
+        """
+        Send an OPTIONS request to the device.
+
+        Returns:
+            The requests.Response object.
+        """
         resp = requests.options(urljoin(self._url, "fs/"), **self._kwargs)
         resp.raise_for_status()
         return resp
 
     @request_exception_wrapper
     def get(self, path):
-        """Send a GET request to the device to retrieve data."""
+        """
+        Send a GET request to the device to retrieve data.
+
+        Args:
+            path: The path of the resource to retrieve.
+
+        Returns:
+            The requests.Response object.
+        """
         resp = requests.get(
             urljoin(self._url, path), headers=self._headers, **self._kwargs
         )
@@ -98,7 +130,16 @@ class Client:
 
     @request_exception_wrapper
     def put(self, path, data=None):
-        """Send a PUT request to the device to create/update a file or directory."""
+        """
+        Send a PUT request to the device to create/update a file or directory.
+
+        Args:
+            path: The path of the resource to create or update.
+            data: The data to send with the request (e.g., file content).
+
+        Returns:
+            The requests.Response object.
+        """
         resp = requests.put(
             urljoin(self._url, path), data=data, headers=self._headers, **self._kwargs
         )
@@ -107,7 +148,16 @@ class Client:
 
     @request_exception_wrapper
     def move(self, src_path, dest_path):
-        """Send a MOVE request to the device to rename/move a file or directory."""
+        """
+        Send a MOVE request to the device to rename/move a file or directory.
+
+        Args:
+            src_path: The source path of the file or directory.
+            dest_path: The destination path.
+
+        Returns:
+            The requests.Response object.
+        """
         headers = dict(self._headers)
         headers["X-Destination"] = dest_path
         resp = requests.request(
@@ -118,7 +168,15 @@ class Client:
 
     @request_exception_wrapper
     def delete(self, path):
-        """Send a DELETE request to the device to delete a file or directory."""
+        """
+        Send a DELETE request to the device to delete a file or directory.
+
+        Args:
+            path: The path of the file or directory to delete.
+
+        Returns:
+            The requests.Response object.
+        """
         resp = requests.delete(
             urljoin(self._url, path), headers=self._headers, **self._kwargs
         )
@@ -126,15 +184,30 @@ class Client:
         return resp
 
     def cp_devices(self):
-        """Get device information."""
+        """
+        Get device information.
+
+        Returns:
+            The requests.Response object containing device information.
+        """
         return self.get("cp/devices.json")
 
     def cp_version(self):
-        """Get CircuitPython version information."""
+        """
+        Get CircuitPython version information.
+
+        Returns:
+            The requests.Response object containing version information.
+        """
         return self.get("cp/version.json")
 
     def cp_diskinfo(self):
-        """Get disk usage information."""
+        """
+        Get disk usage information.
+
+        Returns:
+            The requests.Response object containing disk information.
+        """
         return self.get("cp/diskinfo.json")
 
     def code_web(self):
@@ -154,6 +227,11 @@ class Client:
 def ptree(tree_dict, prefix="", path_root=None):
     """
     Prints a formatted tree from a dictionary representation of a file system.
+
+    Args:
+        tree_dict: A dictionary representing the file system structure.
+        prefix: A string prefix for formatting the tree.
+        path_root: The root path to print at the beginning.
     """
     if path_root:
         print(Path(path_root).as_posix() + "/")
@@ -185,6 +263,10 @@ def ptree(tree_dict, prefix="", path_root=None):
 class Device:
     """
     Represents a CircuitPython device and its local cache.
+
+    Args:
+        client: An instance of the Client class for communication.
+        local_path: The path to the local cache directory.
     """
 
     def __init__(self, client: Client, local_path: os.PathLike = DEFAULT_CACHE_PATH):
@@ -197,22 +279,52 @@ class Device:
 
     @property
     def uid(self):
+        """
+        The unique ID of the CircuitPython device.
+
+        Returns:
+            The UID as a string, or None if not found.
+        """
         return self._version.get("UID", None)
 
     @property
     def version(self):
+        """
+        The version information of the CircuitPython device.
+
+        Returns:
+            A dictionary with version details.
+        """
         return self._version
 
     @property
     def disk_info(self):
+        """
+        The disk usage information of the device.
+
+        Returns:
+            A dictionary with disk usage details.
+        """
         return self.client.cp_diskinfo().json()
 
     @property
     def list_backups(self):
+        """
+        A list of available local backups.
+
+        Returns:
+            A list of Path objects for each backup.
+        """
         return list((self._cache_path / "_bak").iterdir())
 
     @property
     def cache_path(self):
+        """
+        The path to the local cache directory for the device.
+
+        Returns:
+            A Path object representing the cache directory.
+        """
         return self._cache_path
 
     def _init_cache(self):
@@ -223,7 +335,15 @@ class Device:
 
     @staticmethod
     def auto_backup(cache_path: os.PathLike = DEFAULT_CACHE_PATH):
-        """Creates an automatic backup of the local file system cache."""
+        """
+        Creates an automatic backup of the local file system cache.
+
+        Args:
+            cache_path: The path to the cache directory to back up.
+
+        Returns:
+            The path to the created backup, or None if the backup failed.
+        """
         cache_path = Path(cache_path)
         fs_dir = cache_path / "fs"
         bak_dir = cache_path / "_bak"
@@ -237,12 +357,18 @@ class Device:
                 print(f"Created backup at: {backup_path}")
                 return backup_path
         except OSError:
-            print(f"Failed to create backup of CircuitPython device.")
+            print("Failed to create backup of CircuitPython device.")
         return None
 
     @staticmethod
     def restore_backup(cache_path: os.PathLike, backup_path: os.PathLike):
-        """Restores the local file system cache from a backup."""
+        """
+        Restores the local file system cache from a backup.
+
+        Args:
+            cache_path: The path to the cache directory to restore to.
+            backup_path: The path of the backup to restore from.
+        """
         cache_path = Path(cache_path)
         backup_path = Path(backup_path)
         fs_dir = cache_path / "fs"
@@ -253,10 +379,19 @@ class Device:
             else:
                 raise FileNotFoundError("Backup not found or corrupted")
         except OSError:
-            print(f"Failed to restore backup of CircuitPython device.")
+            print("Failed to restore backup of CircuitPython device.")
 
     def tree(self, path: os.PathLike = "fs/", tree_=None):
-        """Recursively builds a dictionary representation of the device's file system."""
+        """
+        Recursively builds a dictionary representation of the device's file system.
+
+        Args:
+            path: The starting path to build the tree from.
+            tree_: An existing dictionary to append the tree to (for recursion).
+
+        Returns:
+            A dictionary representing the file system tree.
+        """
         path = Path(path)
         if tree_ is None:
             tree_ = {}
@@ -284,14 +419,17 @@ class Device:
         return tree_
 
     def glob(
-            self, pattern: str = None, *, root_path: os.PathLike = "fs/"
+        self, pattern: str = None, *, root_path: os.PathLike = "fs/"
     ) -> Iterator[str]:
         """
         Recursively collects and yields file and directory paths from the device.
 
-        :param pattern: A Unix-style glob pattern to match filenames (e.g., "*.py").
-        :param root_path: The starting path to glob from.
-        :yields: The path of a file or directory as a string.
+        Args:
+            pattern: A Unix-style glob pattern to match filenames (e.g., "*.py").
+            root_path: The starting path to glob from.
+
+        Yields:
+            The path of a file or directory as a string.
         """
         root_path = Path(root_path)
 
@@ -370,12 +508,30 @@ class Device:
                 print(f"Error: {e}")
 
     def upload(self, path, filename):
-        """Upload a local file to the device."""
+        """
+        Upload a local file to the device.
+
+        Args:
+            path: The destination path on the device.
+            filename: The path to the local file to upload.
+
+        Returns:
+            The requests.Response object.
+        """
         with open(filename, "rb") as fp:
             return self.client.put(path, data=fp)
 
     def download(self, path, dest_filename):
-        """Download a file from the server to local disk."""
+        """
+        Download a file from the server to local disk.
+
+        Args:
+            path: The path of the file on the device.
+            dest_filename: The local path to save the downloaded file to.
+
+        Returns:
+            The path to the downloaded file.
+        """
         response = self.client.get(path)
         with open(dest_filename, "wb") as fp:
             fp.write(response.content)
@@ -383,18 +539,38 @@ class Device:
 
 
 class Repl:
+    """
+    Client for interacting with the CircuitPython REPL using asyncio and websockets.
+
+    Args:
+        client: An instance of a client class that provides the device URL and authentication.
+    """
+
     def __init__(self, client):
         self.client = client
         self._is_running = True
 
     async def run_repl_ws(self):
-        ws_url = self.client._url.replace("http://", "ws://").replace(
+        """
+        Connects to the REPL via a WebSocket and handles input and output asynchronously.
+
+        This method will attempt to reconnect indefinitely until the user exits. It
+        creates two separate tasks: one for handling incoming messages from the WebSocket
+        and one for handling user input from the console.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        ws_url = self.client.url.replace("http://", "ws://").replace(
             "https://", "wss://"
         )
         ws_url = urljoin(ws_url, "cp/serial/")
 
         auth_header = "Basic " + base64.b64encode(
-            f":{self.client._auth[1]}".encode("utf-8")
+            f":{self.client.password}".encode("utf-8")
         ).decode("utf-8")
         headers = {"Authorization": auth_header}
 
@@ -403,7 +579,7 @@ class Repl:
         while self._is_running:
             try:
                 async with websockets.connect(
-                        ws_url, additional_headers=headers, ping_interval=5
+                    ws_url, additional_headers=headers, ping_interval=5
                 ) as ws:
                     await ws.send("\r")
 
@@ -430,16 +606,13 @@ class Repl:
                             self._is_running = False
                             await ws.close()
 
-                    # Запускаємо як окремі таски
                     out_task = asyncio.create_task(output_handler())
                     in_task = asyncio.create_task(input_handler())
 
-                    # Чекаємо завершення будь-якого
                     done, pending = await asyncio.wait(
                         [out_task, in_task], return_when=asyncio.FIRST_COMPLETED
                     )
 
-                    # Скасовуємо, якщо лишились живі
                     for task in pending:
                         task.cancel()
 
@@ -452,6 +625,18 @@ class Repl:
             print("* Reconnecting attempt")
 
     def start_repl(self):
+        """
+        Starts the asyncio event loop and runs the REPL WebSocket client.
+
+        This method is the main entry point for starting the REPL connection. It handles
+        keyboard interrupts and ensures all tasks are properly shut down.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -460,36 +645,71 @@ class Repl:
             print("\n* Interrupted, closing connection...")
             self._is_running = False
         finally:
-            # Скасувати всі ще живі таски
             tasks = asyncio.all_tasks(loop)
             for t in tasks:
                 t.cancel()
             loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
 
-            # Закрити executor (уникає GIL-крешу на Windows)
             loop.run_until_complete(loop.shutdown_asyncgens())
             loop.run_until_complete(loop.shutdown_default_executor())
             loop.close()
 
 
 class Repl2:
-    def __init__(self, client):
+    """
+    Client for interacting with the CircuitPython REPL using a synchronous websocket library.
+
+    This implementation uses a blocking `run_forever` call in a separate thread.
+
+    Args:
+        client: An instance of a client class that provides the device URL and authentication.
+    """
+
+    def __init__(self, client: Client):
         self.client = client
         self._is_running = True
         self.ws = None
 
     def on_message(self, ws, message):
+        """
+        Callback function to handle incoming WebSocket messages.
+
+        Args:
+            ws: The WebSocketApp instance.
+            message: The message received from the server.
+        """
         if isinstance(message, bytes):
             message = message.decode(errors="replace")
         print(message, end="", flush=True)
 
     def on_error(self, ws, error):
+        """
+        Callback function to handle WebSocket errors.
+
+        Args:
+            ws: The WebSocketApp instance.
+            error: The error object.
+        """
         print(f"* Error: {error}", file=sys.stderr)
 
     def on_close(self, ws, close_status_code, close_msg):
+        """
+        Callback function to handle WebSocket connection closure.
+
+        Args:
+            ws: The WebSocketApp instance.
+            close_status_code: The WebSocket close status code.
+            close_msg: The close message.
+        """
         print("* Connection closed by server.", file=sys.stderr)
 
     def on_open(self, ws):
+        """
+        Callback function to handle a successful WebSocket connection.
+
+        Args:
+            ws: The WebSocketApp instance.
+        """
         print("* Connected to REPL. Press Ctrl+C or Ctrl+D to exit.")
         ws.send("\r")
 
@@ -505,13 +725,24 @@ class Repl2:
         threading.Thread(target=input_loop, daemon=True).start()
 
     def run_forever(self):
-        ws_url = self.client._url.replace("http://", "ws://").replace(
+        """
+        Starts the WebSocket connection and runs it indefinitely.
+
+        This method handles reconnections and KeyboardInterrupts.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        ws_url = self.client.url.replace("http://", "ws://").replace(
             "https://", "wss://"
         )
         ws_url = ws_url.rstrip("/") + "/cp/serial/"
 
         auth_header = "Basic " + base64.b64encode(
-            f":{self.client._auth[1]}".encode("utf-8")
+            f":{self.client.password}".encode("utf-8")
         ).decode("utf-8")
 
         while self._is_running:
