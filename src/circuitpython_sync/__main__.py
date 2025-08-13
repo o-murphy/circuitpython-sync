@@ -1,5 +1,4 @@
 import argparse
-import asyncio
 import sys
 import tempfile
 from pathlib import Path
@@ -11,7 +10,6 @@ from circuitpython_sync import (
     DEFAULT_URL,
     DEFAULT_PASS,
     ptree,
-    Repl,
     Repl2,
 )
 
@@ -91,10 +89,17 @@ def main(args=None):
         help="Connects to the device's serial REPL over WebSocket.",
         parents=[common_parser]
     )
+    repl_parser.add_argument("--web", action="store_true", help="Switch to WebREPL instead of cli")
 
     code_parser = subparsers.add_parser(
         "code",
-        help="Open web workflow",
+        help="Connect to the device's web workflow.",
+        parents=[common_parser]
+    )
+
+    files_parser = subparsers.add_parser(
+        "files",
+        help="Explore files over the web.",
         parents=[common_parser]
     )
 
@@ -109,9 +114,17 @@ def main(args=None):
             elif ns.command == "tree":
                 with tempfile.TemporaryDirectory() as tmpdir:
                     ptree(Device(client, Path(tmpdir)).tree(ns.path))
+            elif ns.command == "code":
+                client.code_web()
+            elif ns.command == "files":
+                client.files_web()
             elif ns.command == "repl":
                 # Repl(client).start_repl()
-                Repl2(client).run_forever()
+                if ns.web:
+                    client.repl_web()
+                else:
+                    Repl2(client).run_forever()
+
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
 

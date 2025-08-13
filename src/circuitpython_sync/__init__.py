@@ -16,8 +16,6 @@ from urllib.parse import urljoin
 import requests
 import websocket
 import websockets
-from prompt_toolkit.patch_stdout import patch_stdout
-from websockets.asyncio import async_timeout
 
 DEFAULT_URL = "http://circuitpython.local/"
 DEFAULT_PASS = "passw0rd"
@@ -286,7 +284,7 @@ class Device:
         return tree_
 
     def glob(
-        self, pattern: str = None, *, root_path: os.PathLike = "fs/"
+            self, pattern: str = None, *, root_path: os.PathLike = "fs/"
     ) -> Iterator[str]:
         """
         Recursively collects and yields file and directory paths from the device.
@@ -405,7 +403,7 @@ class Repl:
         while self._is_running:
             try:
                 async with websockets.connect(
-                    ws_url, additional_headers=headers, ping_interval=5
+                        ws_url, additional_headers=headers, ping_interval=5
                 ) as ws:
                     await ws.send("\r")
 
